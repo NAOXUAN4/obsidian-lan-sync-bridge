@@ -121,7 +121,12 @@ export function registerIPCHandlers(mainWindow: BrowserWindow) {
 
   // sync history
   ipcMain.handle('sync:listSnapshots', async () => {
-    const vaultPath = getCurrentVaultPath();
+    let vaultPath = getCurrentVaultPath();
+    if (!vaultPath) {
+      const active = getActiveVault();
+      if (active) vaultPath = active.path;
+    }
+    if (!vaultPath) return { ok: true, files: [] };
     const historyDir = path.join(vaultPath, '.sync-history');
     const files: { filePath: string; currentPath: string; snapshots: { name: string; path: string; mtime: number }[] }[] = [];
 

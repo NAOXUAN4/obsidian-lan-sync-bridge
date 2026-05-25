@@ -118,6 +118,7 @@ const selectedFileData = ref<FileEntry | null>(null);
 const selectedSnapshot = ref('');
 const collapsedGroups = ref(new Set<string>());
 let cleanupSnapshot: (() => void) | null = null;
+let cleanupStatus: (() => void) | null = null;
 
 const selectedSnapshots = ref<SnapshotEntry[]>([]);
 
@@ -206,9 +207,13 @@ onMounted(async () => {
   cleanupSnapshot = window.electronAPI!.on('sync:snapshot', () => {
     fetchSnapshots();
   });
+  cleanupStatus = window.electronAPI!.on('webdav:statusChanged', () => {
+    fetchSnapshots();
+  });
 });
 
 onBeforeUnmount(() => {
   cleanupSnapshot?.();
+  cleanupStatus?.();
 });
 </script>
