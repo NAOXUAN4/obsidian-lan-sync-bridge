@@ -78,11 +78,10 @@ export async function startServer(
 ): Promise<WebDAVStatus> {
   if (server) {
     await stopServer();
-    // Wait for OS to release the port before rebinding
     await new Promise(r => setTimeout(r, 500));
   }
 
-  versionedFS = new VersionedFileSystem(vaultPath);
+  versionedFS = new VersionedFileSystem(vaultPath, vaultPath);
 
   storedSnapshotCallback = onSnapshot;
   if (onSnapshot) {
@@ -140,7 +139,6 @@ export async function stopServer(): Promise<void> {
       console.log('WebDAV server stopped');
       resolve();
     });
-    // Safety timeout in case stop callback never fires
     setTimeout(() => resolve(), 5000);
   });
 }

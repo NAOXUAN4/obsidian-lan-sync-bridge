@@ -18,6 +18,10 @@ IPs are grouped so you know which one to use:
 - **Tailscale** — if you have Tailscale running, those 100.x.x.x addresses work from anywhere
 - **Other** — everything else
 
+## Security
+
+`.sync-history/` and `.obsidian/` directories are **excluded** from the WebDAV server entirely — they won't appear in listings or be accessible via GET/PUT. This prevents Remotely Save from syncing snapshot files and eliminates 409 Conflict errors caused by sync loops.
+
 ## Version snapshots
 
 Snapshots live in `<vault>/.sync-history/<file-path>/<timestamp>.md`. The History panel groups them by date, shows a diff against the current file, and lets you restore or delete old versions.

@@ -17,6 +17,7 @@
 <script setup lang="ts">
 import { onMounted } from 'vue';
 import { useTabStore } from '../../store/tabStore';
+import { useSessionStore } from '../../store/sessionStore';
 
 import { Radio, History, Terminal, FolderOpen } from 'lucide-vue-next';
 import SyncPanel from '../syncPanel/index.vue';
@@ -24,19 +25,31 @@ import SnapshotBrowser from '../snapshotBrowser/index.vue';
 import VaultSwitcher from '../vaultSwitcher/index.vue';
 
 const { createTab } = useTabStore();
+const sessionStore = useSessionStore();
+
+function activateOrCreateTab(name: string, component: any) {
+  const existing = sessionStore.editorSessions.find(
+    s => s.type === 'Extension' && s.name === name
+  );
+  if (existing) {
+    sessionStore.activateSession(existing.id);
+  } else {
+    createTab('Extension', { component, name });
+  }
+}
 
 const sidebarItems = [
   {
     icon: FolderOpen,
-    clickHandler: () => createTab('Extension', { component: VaultSwitcher, name: 'Vaults' }),
+    clickHandler: () => activateOrCreateTab('Vaults', VaultSwitcher),
   },
   {
     icon: Radio,
-    clickHandler: () => createTab('Extension', { component: SyncPanel, name: 'Sync' }),
+    clickHandler: () => activateOrCreateTab('Sync', SyncPanel),
   },
   {
     icon: History,
-    clickHandler: () => createTab('Extension', { component: SnapshotBrowser, name: 'History' }),
+    clickHandler: () => activateOrCreateTab('History', SnapshotBrowser),
   },
   {
     icon: Terminal,

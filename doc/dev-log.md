@@ -177,3 +177,38 @@ v0.2.0 implementation complete. Three features delivered: vault preset managemen
 - Tagged `v0.2.0` and created GitHub release
 - Release artifact: `Crystal Sync-win32-x64-0.1.0.zip` (Electron Forge make output)
 - Release published at https://github.com/NAOXUAN4/crystal-sync/releases/tag/v0.2.0
+
+---
+
+# Session Log — 2026-05-26
+
+## Summary
+
+v0.3.0 — 409 Conflict fix + sidebar tab activation fix.
+
+## Fix 1: 409 Conflict — .sync-history/.obsidian excluded from WebDAV
+
+### Root Cause
+The `.sync-history/` directory was visible through WebDAV (inside the vault root). Remotely Save's PROPFIND would list it, try to sync snapshot files, creating a feedback loop that caused 409 Conflict errors.
+
+### Changes in `versioned-file-system.ts`
+- Added `EXCLUDED_NAMES = new Set(['.sync-history', '.obsidian'])` — directories invisible to WebDAV
+- Overridden `_readDir` to filter excluded names from directory listings
+- Overridden `_openWriteStream` to reject writes to excluded paths
+
+## Fix 2: Sidebar tab activation
+
+### Root Cause
+Each sidebar icon click called `createTab()` unconditionally, creating a new tab every time even if one was already open.
+
+### Changes in `sideBar/index.vue`
+- New `activateOrCreateTab(name, component)` helper
+- Checks if an Extension tab with the same name already exists in the session store
+- If found, calls `activateSession(id)` instead of creating a new one
+- Terminal tabs still always create new (each terminal is independent)
+
+## Sub-path experiment (reverted)
+subPath support was attempted but reverted due to continued 409 issues. The vault root on PC and phone must match. The `.sync-history`/`.obsidian` exclusion alone was sufficient for the 409 fix.
+
+## Build Status
+- Version bumped to 0.3.0

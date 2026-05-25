@@ -181,7 +181,6 @@ export function registerIPCHandlers(mainWindow: BrowserWindow) {
   ipcMain.handle('sync:deleteSnapshot', async (_event, snapshotPath: string) => {
     try {
       fs.unlinkSync(snapshotPath);
-      // Clean up empty parent dirs up to .sync-history/
       let dir = path.dirname(snapshotPath);
       const historyDir = path.join(getCurrentVaultPath(), '.sync-history');
       while (dir.startsWith(historyDir) && dir !== historyDir) {
