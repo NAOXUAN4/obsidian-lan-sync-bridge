@@ -1,6 +1,6 @@
 import { spawn, ChildProcess } from 'child_process';
 import { BrowserWindow } from 'electron';
-import { platform } from 'os';
+import { homedir, platform } from 'os';
 import iconv from 'iconv-lite'; // 引入编码转换库
 
 // 保存当前正在运行的子进程实例
@@ -30,7 +30,8 @@ export function shellExec(win: BrowserWindow, command: string) {
   // 创建新的子进程
   const child = spawn(command, {
     shell: true,
-    cwd: 'C:/Program Files (X86)',
+    // 以用户主目录为工作目录（此前硬编码了 C:/Program Files (X86)，其他机器上必失败）
+    cwd: homedir(),
     env: {
       ...process.env,
       // Windows下设置中文环境变量（增强兼容性）

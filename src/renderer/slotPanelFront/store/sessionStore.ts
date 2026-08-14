@@ -43,20 +43,21 @@ export const useSessionStore = defineStore('sessionStore', () => {
     // A. 计算下一个该激活谁 (在删除之前问 Manager)
     // 注意：我们需要先确定下一个 ID，再从数组里删掉，
     // 因为 TabManager 现在的逻辑是纯 ID 操作，它不知道 Store 里还没删。
+    const currentIds = editorSessions.value.map(s => s.id);
     let nextId = activeSessionId.value;
 
     if (activeSessionId.value === targetId) {
       // 如果关掉的是当前激活的，才需要计算下一个
-      nextId = tabManager.getNextActiveIdAfterClose(targetId);
+      nextId = tabManager.getNextActiveIdAfterClose(targetId, currentIds);
 
       // 如果 Manager 没返回（比如这是最后一个），兜底逻辑：取数组里前一个
       if (!nextId && editorSessions.value.length > 1) {
-        // 简单的兜底
         const index = editorSessions.value.findIndex(s => s.id === targetId);
+        nextId = index > 0 ? editorSessions.value[index - 1].id : editorSessions.value[1]?.id ?? null;
       }
     } else {
       // 关掉的不是当前激活的，只需从历史中移除，不用改变 activeId
-      tabManager.getNextActiveIdAfterClose(targetId); // 纯粹为了副作用：清理历史
+      tabManager.getNextActiveIdAfterClose(targetId, currentIds); // 纯粹为了副作用：清理历史
     }
 
     // B. 执行销毁逻辑

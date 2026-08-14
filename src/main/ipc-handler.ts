@@ -1,9 +1,49 @@
 import { ipcMain, BrowserWindow, app, dialog } from 'electron';
-import * as fs from 'fs';
+import * as fs from 'fs/promises';
 import * as path from 'path';
 import { shellExec, getCurrentChildProcess } from './service/shell-service';
-import { startServer, stopServer, getStatus, getCurrentVaultPath, getCurrentPort, getStoredSnapshotCallback } from './service/webdav-service';
-import { listVaults, saveVault, deleteVault, setActiveVault, getActiveVault } from './service/vault-store';
+import {
+  startServer,
+  stopServer,
+  getStatus,
+  getCurrentVaultPath,
+  getCurrentPort,
+  getStoredSnapshotCallback,
+  WebDAVCredentials,
+} from './service/webdav-service';
+import {
+  listVaults,
+  saveVault,
+  deleteVault,
+  setActiveVault,
+  getActiveVault,
+  getWebDAVCredentials,
+  saveWebDAVCredentials,
+} from './service/vault-store';
+
+/**
+ * Resolve the currently active vault path (running server wins, otherwise the
+ * stored active vault). Returns '' when no vault is known.
+ */
+function resolveVaultPath(): string {
+  const running = getCurrentVaultPath();
+  if (running) return running;
+  return getActiveVault()?.path || '';
+}
+
+/**
+ * IPC path validation: only paths inside the active vault are allowed.
+ * This blocks a compromised renderer from reading/overwriting arbitrary
+ * files on disk through sync:readFile / sync:restoreSnapshot / sync:deleteSnapshot.
+ */
+function isPathInsideVault(target: string): boolean {
+  const vaultPath = resolveVaultPath();
+  if (!vaultPath) return false;
+  const root = path.resolve(vaultPath);
+  const resolved = path.resolve(target);
+  const rel = path.relative(root, resolved);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
 
 export function registerIPCHandlers(mainWindow: BrowserWindow) {
   /// --------------------------------------- invoke -----------------------------------
@@ -66,10 +106,10 @@ export function registerIPCHandlers(mainWindow: BrowserWindow) {
   });
 
   // webdav
-  ipcMain.handle('webdav:start', async (_event, vaultPath: string, port?: number) => {
+  ipcMain.handle('webdav:start', async (_event, vaultPath: string, port?: number, credentials?: WebDAVCredentials) => {
     const status = await startServer(vaultPath, port || 8080, (snapshot) => {
       mainWindow.webContents.send('sync:snapshot', snapshot);
-    });
+    }, credentials);
     mainWindow.webContents.send('webdav:statusChanged', status);
     return { ok: true, status };
   });
@@ -83,6 +123,17 @@ export function registerIPCHandlers(mainWindow: BrowserWindow) {
 
   ipcMain.handle('webdav:status', async () => {
     return { ok: true, status: getStatus() };
+  });
+
+  ipcMain.handle('webdav:getConfig', async () => {
+    return { ok: true, ...getWebDAVCredentials() };
+  });
+
+  ipcMain.handle('webdav:saveConfig', async (_event, credentials: WebDAVCredentials) => {
+    if (credentials && typeof credentials === 'object') {
+      saveWebDAVCredentials(credentials);
+    }
+    return { ok: true };
   });
 
   // vault management
@@ -104,7 +155,7 @@ export function registerIPCHandlers(mainWindow: BrowserWindow) {
   ipcMain.handle('vault:setActive', async (_event, id: string) => {
     const preset = setActiveVault(id);
     if (preset && getStatus().running) {
-      await startServer(preset.path, getCurrentPort(), getStoredSnapshotCallback());
+      await startServer(preset.path, getCurrentPort(), getStoredSnapshotCallback(), getWebDAVCredentials());
     }
     return { ok: true, preset };
   });
@@ -121,28 +172,32 @@ export function registerIPCHandlers(mainWindow: BrowserWindow) {
 
   // sync history
   ipcMain.handle('sync:listSnapshots', async () => {
-    let vaultPath = getCurrentVaultPath();
-    if (!vaultPath) {
-      const active = getActiveVault();
-      if (active) vaultPath = active.path;
-    }
+    const vaultPath = resolveVaultPath();
     if (!vaultPath) return { ok: true, files: [] };
     const historyDir = path.join(vaultPath, '.sync-history');
     const files: { filePath: string; currentPath: string; snapshots: { name: string; path: string; mtime: number }[] }[] = [];
 
-    function walk(dir: string, relPath: string) {
-      if (!fs.existsSync(dir)) return;
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
+    // Snapshot dirs are named after the original file (with extension), so all
+    // snapshot files are collected regardless of extension (not just .md).
+    async function walk(dir: string, relPath: string): Promise<void> {
+      let entries;
+      try {
+        entries = await fs.readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
       const snapshots: { name: string; path: string; mtime: number }[] = [];
       const subDirs: string[] = [];
 
       for (const e of entries) {
-        if (e.isFile() && e.name.endsWith('.md')) {
-          snapshots.push({
-            name: e.name,
-            path: path.join(dir, e.name),
-            mtime: fs.statSync(path.join(dir, e.name)).mtimeMs,
-          });
+        const full = path.join(dir, e.name);
+        if (e.isFile()) {
+          try {
+            const st = await fs.stat(full);
+            snapshots.push({ name: e.name, path: full, mtime: st.mtimeMs });
+          } catch {
+            // skip unreadable file
+          }
         } else if (e.isDirectory()) {
           subDirs.push(e.name);
         }
@@ -157,17 +212,20 @@ export function registerIPCHandlers(mainWindow: BrowserWindow) {
       }
 
       for (const sub of subDirs) {
-        walk(path.join(dir, sub), path.join(relPath, sub));
+        await walk(path.join(dir, sub), path.join(relPath, sub));
       }
     }
 
-    walk(historyDir, '');
+    await walk(historyDir, '');
     return { ok: true, files };
   });
 
   ipcMain.handle('sync:readFile', async (_event, filePath: string) => {
+    if (!isPathInsideVault(filePath)) {
+      return { ok: false, error: 'Access denied: path is outside the active vault' };
+    }
     try {
-      const content = fs.readFileSync(filePath, 'utf-8');
+      const content = await fs.readFile(filePath, 'utf-8');
       return { ok: true, content };
     } catch (e) {
       return { ok: false, error: String(e) };
@@ -175,8 +233,11 @@ export function registerIPCHandlers(mainWindow: BrowserWindow) {
   });
 
   ipcMain.handle('sync:restoreSnapshot', async (_event, snapshotPath: string, targetPath: string) => {
+    if (!isPathInsideVault(snapshotPath) || !isPathInsideVault(targetPath)) {
+      return { ok: false, error: 'Access denied: path is outside the active vault' };
+    }
     try {
-      fs.copyFileSync(snapshotPath, targetPath);
+      await fs.copyFile(snapshotPath, targetPath);
       return { ok: true };
     } catch (e) {
       return { ok: false, error: String(e) };
@@ -184,15 +245,26 @@ export function registerIPCHandlers(mainWindow: BrowserWindow) {
   });
 
   ipcMain.handle('sync:deleteSnapshot', async (_event, snapshotPath: string) => {
+    if (!isPathInsideVault(snapshotPath)) {
+      return { ok: false, error: 'Access denied: path is outside the active vault' };
+    }
     try {
-      fs.unlinkSync(snapshotPath);
+      await fs.unlink(snapshotPath);
+      // Clean up empty parent dirs (up to but not including the history root)
+      const vaultPath = resolveVaultPath();
+      const historyDir = vaultPath ? path.join(vaultPath, '.sync-history') : '';
       let dir = path.dirname(snapshotPath);
-      const historyDir = path.join(getCurrentVaultPath(), '.sync-history');
-      while (dir.startsWith(historyDir) && dir !== historyDir) {
+      while (historyDir && dir.startsWith(historyDir) && dir !== historyDir) {
         try {
-          if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
-          else break;
-        } catch { break; }
+          const remaining = await fs.readdir(dir);
+          if (remaining.length === 0) {
+            await fs.rmdir(dir);
+          } else {
+            break;
+          }
+        } catch {
+          break;
+        }
         dir = path.dirname(dir);
       }
       return { ok: true };

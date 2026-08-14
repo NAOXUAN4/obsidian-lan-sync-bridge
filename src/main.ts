@@ -97,6 +97,10 @@ const createWindow = () => {
     closable: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      // Explicit hardening: renderer never touches Node directly
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
     },
   });
 
