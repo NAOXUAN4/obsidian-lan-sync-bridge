@@ -184,6 +184,32 @@ v0.2.0 implementation complete. Three features delivered: vault preset managemen
 
 ## Summary
 
+v0.3.1 — SnapshotBrowser empty after app restart fix.
+
+## Fix: SnapshotBrowser shows empty list when server isn't running
+
+### Root Cause
+`sync:listSnapshots` called `getCurrentVaultPath()` which returns null when the WebDAV server isn't running. After app restart, the vault name is known but the server hasn't been started yet, so the snapshot browser showed "No snapshots yet."
+
+### Changes
+
+**`src/main/ipc-handler.ts`**:
+- `sync:listSnapshots` now falls back to `getActiveVault().path` when `getCurrentVaultPath()` returns null
+- Added early return `{ ok: true, files: [] }` if both sources are null, preventing a crash on `path.join(null, ...)`
+
+**`src/renderer/slotPanelFront/workbench/snapshotBrowser/index.vue`**:
+- Added `cleanupStatus` listener for `webdav:statusChanged` event, so snapshot list refreshes when server starts/stops
+- Fixed missing cleanup (the old listener was never cleaned up in `onBeforeUnmount`)
+
+## Build Status
+
+- Version bumped to 0.3.1
+- Commit `561374d`
+
+---
+
+## Summary
+
 v0.3.0 — 409 Conflict fix + sidebar tab activation fix.
 
 ## Fix 1: 409 Conflict — .sync-history/.obsidian excluded from WebDAV
