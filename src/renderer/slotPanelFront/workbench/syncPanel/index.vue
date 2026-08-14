@@ -1,5 +1,17 @@
 <template>
-  <div class="flex h-full flex-col items-center justify-center gap-6 bg-[#141414] p-8">
+  <div class="relative flex h-full flex-col items-center justify-center gap-6 bg-[#141414] p-8">
+    <!-- Credentials button (top-right) -->
+    <button
+      class="absolute right-4 top-4 flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs text-[#888] transition-colors hover:bg-[#1a1a1a] hover:text-[#ccc]"
+      title="WebDAV credentials"
+      @click="openSettings"
+    >
+      <Settings class="size-4" />
+      <span v-if="!credentialsSet" class="flex size-4 items-center justify-center rounded-full bg-[#e5484d] text-[10px] font-bold leading-none text-white">
+        !
+      </span>
+    </button>
+
     <!-- Status -->
     <div class="flex items-center gap-3">
       <div
@@ -60,10 +72,76 @@
 
     <div v-if="error" class="text-sm text-[#e5484d]">{{ error }}</div>
   </div>
+
+  <!-- Credentials modal -->
+  <Teleport to="body">
+    <div
+      v-if="showSettings"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      @click.self="closeSettings"
+    >
+      <div class="w-80 rounded-lg border border-white/[0.06] bg-[#1a1a1a] p-5 shadow-2xl">
+        <div class="mb-4 flex items-center justify-between">
+          <span class="text-sm font-medium text-white">WebDAV Credentials</span>
+          <button class="text-[#666] transition-colors hover:text-[#ccc]" @click="closeSettings">
+            <X class="size-4" />
+          </button>
+        </div>
+
+        <div class="space-y-3">
+          <div>
+            <label class="mb-1 block text-[11px] text-[#888]">Username</label>
+            <input
+              v-model="username"
+              type="text"
+              autocomplete="off"
+              placeholder="e.g. obsidian"
+              class="w-full rounded bg-[#141414] px-3 py-2 text-sm text-[#ccc] outline-none ring-1 ring-white/[0.06] focus:ring-[#5e6ad2] placeholder:text-[#444]"
+            />
+          </div>
+          <div>
+            <label class="mb-1 block text-[11px] text-[#888]">Password</label>
+            <input
+              v-model="password"
+              :type="showPassword ? 'text' : 'password'"
+              autocomplete="new-password"
+              placeholder="••••••••"
+              class="w-full rounded bg-[#141414] px-3 py-2 text-sm text-[#ccc] outline-none ring-1 ring-white/[0.06] focus:ring-[#5e6ad2] placeholder:text-[#444]"
+            />
+          </div>
+          <label class="flex cursor-pointer items-center gap-2 text-[11px] text-[#555]">
+            <input v-model="showPassword" type="checkbox" class="accent-[#5e6ad2]" />
+            Show password
+          </label>
+        </div>
+
+        <div v-if="settingsError" class="mt-2 text-xs text-[#e5484d]">{{ settingsError }}</div>
+        <div v-if="status.running" class="mt-2 text-[11px] text-[#888]">
+          Takes effect on the next server start.
+        </div>
+
+        <div class="mt-5 flex justify-end gap-2">
+          <button
+            class="rounded-md px-3 py-1.5 text-xs text-[#888] transition-colors hover:text-[#ccc]"
+            @click="closeSettings"
+          >
+            Cancel
+          </button>
+          <button
+            class="rounded-md bg-[#5e6ad2] px-4 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[#6c77e0]"
+            @click="saveSettings"
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
 import { reactive, ref, onMounted, onBeforeUnmount } from 'vue';
+import { Settings, X } from 'lucide-vue-next';
 
 interface IPEntry {
   address: string;
@@ -81,6 +159,7 @@ interface WebDAVStatus {
   port: number;
   vaultPath: string;
   ips: CategorizedIPs;
+  auth: boolean;
   error?: string;
 }
 
@@ -89,8 +168,15 @@ const status = reactive<WebDAVStatus>({
   port: 0,
   vaultPath: '',
   ips: { lan: [], tailscale: [], other: [] },
+  auth: false,
 });
 
+const username = ref('');
+const password = ref('');
+const showPassword = ref(false);
+const showSettings = ref(false);
+const settingsError = ref('');
+const credentialsSet = ref(false);
 const error = ref('');
 
 let cleanupStatus: (() => void) | null = null;
@@ -104,6 +190,43 @@ async function getActiveVaultPath(): Promise<string> {
   return '';
 }
 
+async function loadConfig() {
+  const res = await window.electronAPI!.invoke('webdav:getConfig');
+  if (res.ok) {
+    username.value = res.username || '';
+    password.value = res.password || '';
+    credentialsSet.value = !!res.username && !!res.password;
+  }
+}
+
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') closeSettings();
+}
+
+function openSettings() {
+  loadConfig();
+  settingsError.value = '';
+  showSettings.value = true;
+  window.addEventListener('keydown', onKeydown);
+}
+
+function closeSettings() {
+  showSettings.value = false;
+  settingsError.value = '';
+  window.removeEventListener('keydown', onKeydown);
+}
+
+async function saveSettings() {
+  const user = username.value.trim();
+  if (!user || !password.value) {
+    settingsError.value = 'Username and password are required.';
+    return;
+  }
+  await window.electronAPI!.invoke('webdav:saveConfig', { username: user, password: password.value });
+  credentialsSet.value = true;
+  closeSettings();
+}
+
 async function toggleServer() {
   error.value = '';
   if (status.running) {
@@ -115,7 +238,15 @@ async function toggleServer() {
       error.value = 'No vault selected. Add a vault in Vaults panel first.';
       return;
     }
-    const res = await window.electronAPI!.invoke('webdav:start', vaultPath);
+    if (!credentialsSet.value) {
+      error.value = 'Set WebDAV credentials first.';
+      openSettings();
+      return;
+    }
+    const res = await window.electronAPI!.invoke('webdav:start', vaultPath, undefined, {
+      username: username.value.trim(),
+      password: password.value,
+    });
     if (res.ok) {
       Object.assign(status, res.status);
     } else {
@@ -127,6 +258,7 @@ async function toggleServer() {
 onMounted(async () => {
   const res = await window.electronAPI!.invoke('webdav:status');
   if (res.ok) Object.assign(status, res.status);
+  await loadConfig();
 
   cleanupStatus = window.electronAPI!.on('webdav:statusChanged', (newStatus: WebDAVStatus) => {
     Object.assign(status, newStatus);
@@ -135,5 +267,6 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   cleanupStatus?.();
+  window.removeEventListener('keydown', onKeydown);
 });
 </script>

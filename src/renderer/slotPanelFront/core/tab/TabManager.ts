@@ -19,17 +19,20 @@ export class TabManager {
    * @param closingId 正在被关闭的 ID
    * @param allCurrentIds 当前还存在的所有的 ID (从 Store 传进来)
    */
-  getNextActiveIdAfterClose(closingId: string): string | null {
+  getNextActiveIdAfterClose(closingId: string, allCurrentIds: string[]): string | null {
     // 1. 从历史中移除当前 ID
     this.#tabHistory = this.#tabHistory.filter(id => id !== closingId);
 
-    // 2. 如果历史栈里还有东西，取最后一个（最近访问的）
-    if (this.#tabHistory.length > 0) {
-      return this.#tabHistory[this.#tabHistory.length - 1];
+    // 2. 过滤掉已不存在的 ID（stale），只保留还活着的
+    const valid = this.#tabHistory.filter(id => allCurrentIds.includes(id));
+    this.#tabHistory = valid;
+
+    // 3. 取最后一个（最近访问的）
+    if (valid.length > 0) {
+      return valid[valid.length - 1];
     }
 
-    // 3. 如果历史栈空了（极端情况），或者历史栈里的 ID 都不在 allCurrentIds 里了
-    // 这里可以做个兜底，返回 null 或者让 Store 自己决定
+    // 4. 历史栈空了（或全是 stale），返回 null 让 Store 自己兜底
     return null;
   }
 

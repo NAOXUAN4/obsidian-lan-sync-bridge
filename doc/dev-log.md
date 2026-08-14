@@ -1,3 +1,84 @@
+---
+
+# Session Log — 2026-08-14
+
+## Summary
+
+v0.4.0 — WebDAV Basic Auth + security hardening + correctness/performance fixes + leftover cleanup.
+
+## v0.4.0 — WebDAV Basic Auth
+
+### Feature
+- Credentials set once via the gear button (top-right of the Sync panel) → modal → persisted through `webdav:getConfig` / `webdav:saveConfig`
+- Password stored in `~/.crystal-sync/vaults.json` (vault-store), encrypted with Electron `safeStorage` (base64 fallback when the OS keychain is unavailable)
+- `startServer(vaultPath, port, onSnapshot, credentials)` now configures `requireAuthentification: true`, HTTP Basic Auth, and per-user privileges via `SimplePathPrivilegeManager.setRights(user, '/', ['all'])`
+- `WebDAVStatus` exposes an `auth` flag
+
+### Bug: phone showed 401 despite correct credentials
+Two stacked causes:
+
+1. **Our bug — every login failed.** `SimpleUserManager.addUser(name, password, isAdmin)` takes positional args; passing a `SimpleUser` object keyed the store by `"[object Object]"` with an empty password, so no credential could ever match.
+2. **Library bug — some passwords failed.** webdav-server 2.6.2's stock `HTTPBasicAuthentication` parses the header with `/^Basic \s*[a-zA-Z0-9]+=*\s*$/`, which rejects any base64 containing `+` or `/` (part of the standard base64 alphabet). Correct credentials were turned into 401 whenever the encoded `user:password` hit those characters.
+
+Fixes: `addUser(username, password)`; new `CrystalBasicAuthentication` subclass in `webdav-service.ts` with a standards-compliant header regex (`/^Basic\s+([A-Za-z0-9+/]+={0,2})\s*$/i`). Auth failures now log `[webdav] authentication failed for user "…"` to the app terminal.
+
+Verified end-to-end against a live server: no-auth 401 / correct-credentials GET 200 / PROPFIND 207 / wrong password 401 / malformed header 401.
+
+## Security Hardening
+- CSP meta tag added to `src/renderer/slotPanelFront/index.html` (`default-src 'self'`, no `unsafe-eval`)
+- IPC path validation: `sync:readFile` / `sync:restoreSnapshot` / `sync:deleteSnapshot` now reject any path outside the active vault
+- Electron Fuses re-enabled in `forge.config.ts` (RunAsNode off, OnlyLoadAppFromAsar, cookie encryption, node options/inspect args disabled)
+- `main.ts` webPreferences made explicit: `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`
+
+## Correctness
+- Snapshots preserve the original file extension (`versioned-file-system.ts`); previously hardcoded to `.md`
+- `sync:listSnapshots` no longer filters snapshot files to `.md` only
+- `TabManager.getNextActiveIdAfterClose` now honors the `allCurrentIds` param and drops stale history; the dead fallback branch in `sessionStore.closeSession` removed
+- Port-in-use is probed before starting the server, replacing the unreliable async EADDRINUSE catch
+
+## Performance
+- `sync:listSnapshots` / `sync:readFile` / `sync:restoreSnapshot` / `sync:deleteSnapshot` converted from blocking `fs` calls to `fs/promises`
+
+## Cleanup
+- Deleted leftover `conflict-server.js`, `terminalEditor/test.vue`, `terminalEditor/style.scss`, `npminstall-debug.log`
+- `shell-service.ts` hardcoded cwd `C:/Program Files (X86)` → `os.homedir()`
+
+## UI
+- Sync panel: bulky credential form replaced with a top-right gear button + one-time settings modal
+- Snapshot browser: version labels strip any extension (not just `.md`)
+
+## Files Changed
+
+| Action | File |
+|--------|------|
+| Modify | `src/main/service/webdav-service.ts` |
+| Modify | `src/main/service/vault-store.ts` |
+| Modify | `src/main/service/versioned-file-system.ts` |
+| Modify | `src/main/service/shell-service.ts` |
+| Modify | `src/main/ipc-handler.ts` |
+| Modify | `src/main.ts` |
+| Modify | `forge.config.ts` |
+| Modify | `package.json` (0.3.0 → 0.4.0) |
+| Modify | `src/renderer/slotPanelFront/index.html` |
+| Modify | `src/renderer/slotPanelFront/workbench/syncPanel/index.vue` |
+| Modify | `src/renderer/slotPanelFront/workbench/snapshotBrowser/index.vue` |
+| Modify | `src/renderer/slotPanelFront/store/sessionStore.ts` |
+| Modify | `src/renderer/slotPanelFront/core/tab/TabManager.ts` |
+| Delete | `src/main/service/conflict-server.js` |
+| Delete | `src/renderer/slotPanelFront/editors/terminalEditor/test.vue` |
+| Delete | `src/renderer/slotPanelFront/editors/terminalEditor/style.scss` |
+
+## Build Status
+- Renderer `vite build` clean
+- No TypeScript errors in `src/` (`tsc --noEmit --skipLibCheck`)
+- Version bumped to 0.4.0
+
+## Next Steps
+- Verify packaged build with Fuses enabled
+- Observe phone-side 401 fix in real use
+
+---
+
 # Session Log — 2026-05-11
 
 ## Summary
@@ -181,6 +262,32 @@ v0.2.0 implementation complete. Three features delivered: vault preset managemen
 ---
 
 # Session Log — 2026-05-26
+
+## Summary
+
+v0.3.1 — SnapshotBrowser empty after app restart fix.
+
+## Fix: SnapshotBrowser shows empty list when server isn't running
+
+### Root Cause
+`sync:listSnapshots` called `getCurrentVaultPath()` which returns null when the WebDAV server isn't running. After app restart, the vault name is known but the server hasn't been started yet, so the snapshot browser showed "No snapshots yet."
+
+### Changes
+
+**`src/main/ipc-handler.ts`**:
+- `sync:listSnapshots` now falls back to `getActiveVault().path` when `getCurrentVaultPath()` returns null
+- Added early return `{ ok: true, files: [] }` if both sources are null, preventing a crash on `path.join(null, ...)`
+
+**`src/renderer/slotPanelFront/workbench/snapshotBrowser/index.vue`**:
+- Added `cleanupStatus` listener for `webdav:statusChanged` event, so snapshot list refreshes when server starts/stops
+- Fixed missing cleanup (the old listener was never cleaned up in `onBeforeUnmount`)
+
+## Build Status
+
+- Version bumped to 0.3.1
+- Commit `561374d`
+
+---
 
 ## Summary
 

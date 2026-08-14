@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { safeStorage } from 'electron';
 
 export interface VaultPreset {
   id: string;
@@ -9,9 +10,15 @@ export interface VaultPreset {
   createdAt: number;
 }
 
+export interface WebDAVCredentials {
+  username: string;
+  password: string;
+}
+
 interface VaultData {
   activeId: string | null;
   presets: VaultPreset[];
+  webdav?: { username: string; password: string };
 }
 
 const STORE_DIR = path.join(os.homedir(), '.crystal-sync');
@@ -80,4 +87,53 @@ export function setActiveVault(id: string): VaultPreset | null {
 export function getActiveVault(): VaultPreset | null {
   const data = read();
   return data.presets.find(p => p.id === data.activeId) || null;
+}
+
+// ---------------------------------------------------------------------------
+// WebDAV credentials
+//
+// The password is encrypted with Electron's safeStorage when the OS keychain
+// is available, otherwise stored as base64 (obfuscation only). Decrypt tries
+// safeStorage first and falls back to plain base64, so a store written in one
+// environment can still be read in another.
+// ---------------------------------------------------------------------------
+
+function encryptSecret(plain: string): string {
+  try {
+    if (safeStorage.isEncryptionAvailable()) {
+      return safeStorage.encryptString(plain).toString('base64');
+    }
+  } catch {}
+  return Buffer.from(plain, 'utf-8').toString('base64');
+}
+
+function decryptSecret(encoded: string): string {
+  try {
+    if (safeStorage.isEncryptionAvailable()) {
+      const buf = Buffer.from(encoded, 'base64');
+      return safeStorage.decryptString(buf);
+    }
+  } catch {}
+  return Buffer.from(encoded, 'base64').toString('utf-8');
+}
+
+export function getWebDAVCredentials(): WebDAVCredentials {
+  const data = read();
+  const c = data.webdav;
+  if (c && c.username) {
+    return {
+      username: c.username,
+      password: c.password ? decryptSecret(c.password) : '',
+    };
+  }
+  return { username: '', password: '' };
+}
+
+export function saveWebDAVCredentials(credentials: WebDAVCredentials): void {
+  const data = read();
+  data.webdav = {
+    username: (credentials.username || '').trim(),
+    password: credentials.password ? encryptSecret(credentials.password) : '',
+  };
+  write(data);
 }

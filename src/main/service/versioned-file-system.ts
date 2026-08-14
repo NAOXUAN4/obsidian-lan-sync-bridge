@@ -44,7 +44,10 @@ export class VersionedFileSystem extends PhysicalFileSystem {
 
       const relativePath = filePath.replace(/^\/+/, '');
       const snapshotDir = path.join(this.rootPath, '.sync-history', path.dirname(relativePath));
-      const snapshotName = timestampId() + '.md';
+      // Preserve the original file extension so non-markdown files keep a
+      // correct snapshot name (was hardcoded to '.md').
+      const ext = path.extname(relativePath) || '.md';
+      const snapshotName = timestampId() + ext;
       const snapshotPath = path.join(snapshotDir, path.basename(relativePath), snapshotName);
 
       const readStream = fs.createReadStream(realPath);

@@ -66,7 +66,7 @@
             class="group/ver flex shrink-0 items-center gap-1 rounded px-2.5 py-1 text-[11px] font-mono transition-colors"
             :title="snap.name"
           >
-            <span class="cursor-pointer" @click="selectSnapshot(snap)">{{ snap.name.replace('.md', '') }}</span>
+            <span class="cursor-pointer" @click="selectSnapshot(snap)">{{ displayName(snap.name) }}</span>
             <X
               class="size-3 cursor-pointer text-[#555] opacity-0 transition-all hover:text-[#e5484d] group-hover/ver:opacity-100"
               @click.stop="deleteSingleSnapshot(snap)"
@@ -121,6 +121,15 @@ let cleanupSnapshot: (() => void) | null = null;
 let cleanupStatus: (() => void) | null = null;
 
 const selectedSnapshots = ref<SnapshotEntry[]>([]);
+
+// Strip the extension, and render timestampId names (ISO with - in place of :/.):
+// "2026-08-14T09-30-00-000Z.md" → "08-14 09:30:00"
+function displayName(name: string): string {
+  const stripped = name.replace(/\.[^.]*$/, '');
+  const match = stripped.match(/(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})/);
+  if (match) return `${match[2]}-${match[3]} ${match[4]}:${match[5]}:${match[6]}`;
+  return stripped;
+}
 
 function getDateLabel(ts: number): { label: string; order: number } {
   const d = new Date(ts);
